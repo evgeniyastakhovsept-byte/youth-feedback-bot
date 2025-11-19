@@ -387,7 +387,7 @@ async def handle_rating_button(update: Update, context: ContextTypes.DEFAULT_TYP
         
         await query.edit_message_text(
             "📊 Оціни *цікавість* молодіжки від 1 до 5:\n\n"
-            "1 - Не цікаво\n"
+            "1 - Нудно\n"
             "5 - Дуже цікаво",
             reply_markup=reply_markup,
             parse_mode='Markdown'
@@ -462,7 +462,7 @@ async def handle_spiritual_rating(update: Update, context: ContextTypes.DEFAULT_
     reply_markup = InlineKeyboardMarkup(keyboard)
     
     await query.edit_message_text(
-        "✅ Дякую за оцінки!\n\n"
+        "✅ Дякуємо за оцінки!\n\n"
         "Хочеш залишити письмовий відгук? (3-4 речення)",
         reply_markup=reply_markup
     )
@@ -492,7 +492,7 @@ async def handle_feedback_choice(update: Update, context: ContextTypes.DEFAULT_T
             del user_ratings[user_id]
         
         await query.edit_message_text(
-            "✅ Євгеній дякує тобі за зворотний зв'язок! 🙏"
+            "✅ Дякуємо за зворотний зв'язок! 🙏"
         )
         return ConversationHandler.END
     
@@ -531,7 +531,7 @@ async def handle_feedback_text(update: Update, context: ContextTypes.DEFAULT_TYP
     del user_ratings[user_id]
     
     await update.message.reply_text(
-        "✅ Євгеній дякує тобі за детальний зворотний зв'язок! 🙏"
+        "✅ Дякуємо за детальний зворотний зв'язок! 🙏"
     )
     return ConversationHandler.END
 
@@ -771,8 +771,9 @@ async def admin_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
 /graph year - Графік за рік (по місяцях)
 /graph all - Графік за весь період (по кварталах)
 
-💾 *База даних:*
-/export\\_db - Завантажити базу даних
+💾 *Експорт даних:*
+/export\\_excel - Завантажити дані в Excel
+/export\\_db - Завантажити базу даних SQLite
 
 ❓ /help - Показати це повідомлення
     """
@@ -836,6 +837,176 @@ async def admin_export_db(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 
+async def admin_export_excel(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Экспортирует базу данных в Excel"""
+    if update.effective_user.id != config.ADMIN_ID:
+        await update.message.reply_text("У тебе немає доступу до цієї команди.")
+        return
+    
+    await update.message.reply_text("⏳ Створюю Excel файл...")
+    
+    try:
+        from openpyxl import Workbook
+        from openpyxl.styles import Font, PatternFill, Alignment
+        
+        wb = Workbook()
+        
+        # Удаляем стандартный лист
+        wb.remove(wb.active)
+        
+        conn = db.get_connection()
+        cursor = conn.cursor()
+        
+        # === ЛИСТ 1: Користувачі ===
+        ws_users = wb.create_sheet("Користувачі")
+        ws_users.append(["ID", "Username", "Ім'я", "Прізвище", "Дата додавання"])
+        
+        cursor.execute('SELECT user_id, username, first_name, last_name, joined_date FROM users ORDER BY joined_date')
+        for row in cursor.fetchall():
+            ws_users.append(list(row))
+        
+        # Форматирование заголовков
+        for cell in ws_users[1]:
+            cell.font = Font(bold=True, color="FFFFFF")
+            cell.fill = PatternFill(start_color="4472C4", end_color="4472C4", fill_type="solid")
+            cell.alignment = Alignment(horizontal="center")
+        
+        # === ЛИСТ 2: Зустрічі ===
+        ws_meetings = wb.create_sheet("Зустрічі")
+        ws_meetings.append(["ID", "Дата початку", "Активна", "Середня цікавість", "Середня актуальність", "Середнє духовне зростання", "Відвідали"])
+        
+        cursor.execute('''
+            SELECT 
+                m.meeting_id,
+                m.start_date,
+                CASE WHEN m.is_active = 1 THEN 'Так' ELSE 'Ні' END,
+                ROUND(AVG(CASE WHEN r.attended = 1 THEN r.interest_rating END), 2),
+                ROUND(AVG(CASE WHEN r.attended = 1 THEN r.relevance_rating END), 2),
+                ROUND(AVG(CASE WHEN r.attended = 1 THEN r.spiritual_growth_rating END), 2),
+                COUNT(CASE WHEN r.attended = 1 THEN 1 END)
+            FROM youth_meetings m
+            LEFT JOIN ratings r ON m.meeting_id = r.meeting_id
+            GROUP BY m.meeting_id
+            ORDER BY m.start_date DESC
+        ''')
+        for row in cursor.fetchall():
+            ws_meetings.append(list(row))
+        
+        for cell in ws_meetings[1]:
+            cell.font = Font(bold=True, color="FFFFFF")
+            cell.fill = PatternFill(start_color="70AD47", end_color="70AD47", fill_type="solid")
+            cell.alignment = Alignment(horizontal="center")
+        
+        # === ЛИСТ 3: Оцінки ===
+        ws_ratings = wb.create_sheet("Оцінки")
+        ws_ratings.append(["ID зустрічі", "Дата зустрічі", "User ID", "Ім'я", "Відвідав", "Цікавість", "Актуальність", "Духовне зростання", "Дата оцінки"])
+        
+        cursor.execute('''
+            SELECT 
+                m.meeting_id,
+                m.start_date,
+                r.user_id,
+                u.first_name || ' ' || COALESCE(u.last_name, ''),
+                CASE WHEN r.attended = 1 THEN 'Так' ELSE 'Ні' END,
+                r.interest_rating,
+                r.relevance_rating,
+                r.spiritual_growth_rating,
+                r.rating_date
+            FROM ratings r
+            JOIN youth_meetings m ON r.meeting_id = m.meeting_id
+            JOIN users u ON r.user_id = u.user_id
+            ORDER BY m.start_date DESC, r.rating_date
+        ''')
+        for row in cursor.fetchall():
+            ws_ratings.append(list(row))
+        
+        for cell in ws_ratings[1]:
+            cell.font = Font(bold=True, color="FFFFFF")
+            cell.fill = PatternFill(start_color="FFC000", end_color="FFC000", fill_type="solid")
+            cell.alignment = Alignment(horizontal="center")
+        
+        # === ЛИСТ 4: Відгуки ===
+        ws_feedback = wb.create_sheet("Відгуки")
+        ws_feedback.append(["ID зустрічі", "Дата зустрічі", "Відгук", "Дата відгуку"])
+        
+        cursor.execute('''
+            SELECT 
+                m.meeting_id,
+                m.start_date,
+                f.feedback_text,
+                f.feedback_date
+            FROM feedback f
+            JOIN youth_meetings m ON f.meeting_id = m.meeting_id
+            ORDER BY m.start_date DESC, f.feedback_date
+        ''')
+        for row in cursor.fetchall():
+            ws_feedback.append(list(row))
+        
+        for cell in ws_feedback[1]:
+            cell.font = Font(bold=True, color="FFFFFF")
+            cell.fill = PatternFill(start_color="9966FF", end_color="9966FF", fill_type="solid")
+            cell.alignment = Alignment(horizontal="center")
+        
+        # Устанавливаем ширину колонок
+        for ws in [ws_users, ws_meetings, ws_ratings, ws_feedback]:
+            for column in ws.columns:
+                max_length = 0
+                column_letter = column[0].column_letter
+                for cell in column:
+                    try:
+                        if len(str(cell.value)) > max_length:
+                            max_length = len(str(cell.value))
+                    except:
+                        pass
+                adjusted_width = min(max_length + 2, 50)
+                ws.column_dimensions[column_letter].width = adjusted_width
+        
+        conn.close()
+        
+        # Сохраняем файл
+        filename = f'youth_feedback_{datetime.now().strftime("%Y%m%d_%H%M%S")}.xlsx'
+        wb.save(filename)
+        
+        # Получаем статистику
+        file_size = os.path.getsize(filename)
+        file_size_kb = file_size / 1024
+        
+        cursor = db.get_connection().cursor()
+        cursor.execute('SELECT COUNT(*) FROM users')
+        users_count = cursor.fetchone()[0]
+        cursor.execute('SELECT COUNT(*) FROM youth_meetings')
+        meetings_count = cursor.fetchone()[0]
+        cursor.execute('SELECT COUNT(*) FROM ratings WHERE attended = 1')
+        ratings_count = cursor.fetchone()[0]
+        cursor.execute('SELECT COUNT(*) FROM feedback')
+        feedback_count = cursor.fetchone()[0]
+        
+        # Формируем описание
+        caption = f"📊 *Excel експорт бази даних*\n\n"
+        caption += f"📋 Листи:\n"
+        caption += f"• Користувачі ({users_count})\n"
+        caption += f"• Зустрічі ({meetings_count})\n"
+        caption += f"• Оцінки ({ratings_count})\n"
+        caption += f"• Відгуки ({feedback_count})\n\n"
+        caption += f"📦 Розмір: {file_size_kb:.1f} КБ\n"
+        caption += f"🗓 Створено: {datetime.now().strftime('%d.%m.%Y %H:%M')}"
+        
+        # Отправляем файл
+        await update.message.reply_document(
+            document=open(filename, 'rb'),
+            filename=filename,
+            caption=caption,
+            parse_mode='Markdown'
+        )
+        
+        # Удаляем временный файл
+        os.remove(filename)
+        
+    except Exception as e:
+        logger.error(f"Error exporting to Excel: {e}")
+        await update.message.reply_text(f"❌ Помилка при створенні Excel файлу: {str(e)}")
+
+
 def main():
     """Главная функция запуска бота"""
     # Проверяем что ADMIN_ID установлен
@@ -871,6 +1042,7 @@ def main():
     application.add_handler(CommandHandler("stats", admin_stats))
     application.add_handler(CommandHandler("graph", admin_graph))
     application.add_handler(CommandHandler("export_db", admin_export_db))
+    application.add_handler(CommandHandler("export_excel", admin_export_excel))
     application.add_handler(CallbackQueryHandler(handle_approval, pattern='^(approve|reject|remove)_'))
     application.add_handler(rating_conv_handler)
     
