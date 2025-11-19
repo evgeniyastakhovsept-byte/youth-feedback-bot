@@ -1,4 +1,5 @@
 import logging
+import os
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
     Application, 
@@ -386,7 +387,7 @@ async def handle_rating_button(update: Update, context: ContextTypes.DEFAULT_TYP
         
         await query.edit_message_text(
             "📊 Оціни *цікавість* молодіжки від 1 до 5:\n\n"
-            "1 - Нудно\n"
+            "1 - Не цікаво\n"
             "5 - Дуже цікаво",
             reply_markup=reply_markup,
             parse_mode='Markdown'
@@ -461,7 +462,7 @@ async def handle_spiritual_rating(update: Update, context: ContextTypes.DEFAULT_
     reply_markup = InlineKeyboardMarkup(keyboard)
     
     await query.edit_message_text(
-        "✅ Дякуємо за оцінки!\n\n"
+        "✅ Дякую за оцінки!\n\n"
         "Хочеш залишити письмовий відгук? (3-4 речення)",
         reply_markup=reply_markup
     )
@@ -491,7 +492,7 @@ async def handle_feedback_choice(update: Update, context: ContextTypes.DEFAULT_T
             del user_ratings[user_id]
         
         await query.edit_message_text(
-            "✅ Дякуємо за зворотний зв'язок! 🙏"
+            "✅ Євгеній дякує тобі за зворотний зв'язок! 🙏"
         )
         return ConversationHandler.END
     
@@ -530,7 +531,7 @@ async def handle_feedback_text(update: Update, context: ContextTypes.DEFAULT_TYP
     del user_ratings[user_id]
     
     await update.message.reply_text(
-        "✅ Дякуємо за детальний зворотний зв'язок! 🙏"
+        "✅ Євгеній дякує тобі за детальний зворотний зв'язок! 🙏"
     )
     return ConversationHandler.END
 
@@ -609,51 +610,137 @@ async def admin_graph(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("У тебе немає доступу до цієї команди.")
         return
     
-    # Получаем период из аргументов (30 или 365 дней)
-    if context.args and context.args[0] in ['month', 'year']:
-        period = 30 if context.args[0] == 'month' else 365
-    else:
+    # Получаем тип графика из аргументов
+    if not context.args or context.args[0] not in ['month', 'year', 'all']:
         await update.message.reply_text(
-            "Вкажи період: /graph month або /graph year"
+            "Вкажи тип графіка:\n"
+            "📊 /graph month - за місяць (по тижнях)\n"
+            "📊 /graph year - за рік (по місяцях)\n"
+            "📊 /graph all - за весь період (по кварталах)"
         )
         return
     
-    stats = db.get_stats_for_period(period)
+    graph_type = context.args[0]
+    
+    # Получаем данные в зависимости от типа
+    if graph_type == 'month':
+        stats = db.get_stats_for_period(30)
+        title = "Динаміка оцінок за місяць"
+        group_by = 'week'
+    elif graph_type == 'year':
+        stats = db.get_stats_for_period(365)
+        title = "Динаміка оцінок за рік"
+        group_by = 'month'
+    else:  # all
+        stats = db.get_all_stats()
+        title = "Динаміка оцінок за весь період"
+        group_by = 'quarter'
     
     if not stats:
         await update.message.reply_text("❌ Немає даних за вказаний період.")
         return
     
+    # Если данных меньше 2 точек, предупреждаем
+    if len(stats) < 2:
+        await update.message.reply_text(
+            f"⚠️ Недостатньо даних для графіка (тільки {len(stats)} зустріч).\n"
+            "Графік буде більш інформативним після 3+ зустрічей."
+        )
+    
+    # Группируем данные
+    from datetime import datetime
+    from collections import defaultdict
+    
+    grouped_data = defaultdict(lambda: {'interest': [], 'relevance': [], 'spiritual': [], 'dates': []})
+    
+    for s in stats:
+        date_obj = datetime.fromisoformat(s['date'])
+        
+        if group_by == 'week':
+            # Группируем по неделям (понедельник каждой недели)
+            week_start = date_obj - timedelta(days=date_obj.weekday())
+            key = week_start.strftime('%Y-%W')
+            display_date = week_start
+        elif group_by == 'month':
+            # Группируем по месяцам
+            key = date_obj.strftime('%Y-%m')
+            display_date = date_obj.replace(day=1)
+        else:  # quarter
+            # Группируем по кварталам
+            quarter = (date_obj.month - 1) // 3 + 1
+            key = f"{date_obj.year}-Q{quarter}"
+            quarter_month = (quarter - 1) * 3 + 1
+            display_date = date_obj.replace(month=quarter_month, day=1)
+        
+        grouped_data[key]['interest'].append(s['avg_interest'])
+        grouped_data[key]['relevance'].append(s['avg_relevance'])
+        grouped_data[key]['spiritual'].append(s['avg_spiritual'])
+        grouped_data[key]['dates'].append(display_date)
+    
+    # Вычисляем средние по группам
+    dates = []
+    interest = []
+    relevance = []
+    spiritual = []
+    
+    for key in sorted(grouped_data.keys()):
+        data = grouped_data[key]
+        dates.append(data['dates'][0])
+        interest.append(sum(data['interest']) / len(data['interest']))
+        relevance.append(sum(data['relevance']) / len(data['relevance']))
+        spiritual.append(sum(data['spiritual']) / len(data['spiritual']))
+    
     # Создаем график
-    dates = [s['date'] for s in stats]
-    interest = [s['avg_interest'] for s in stats]
-    relevance = [s['avg_relevance'] for s in stats]
-    spiritual = [s['avg_spiritual'] for s in stats]
+    plt.figure(figsize=(14, 7))
+    plt.plot(dates, interest, marker='o', label='Цікавість', linewidth=2.5, markersize=10)
+    plt.plot(dates, relevance, marker='s', label='Актуальність', linewidth=2.5, markersize=10)
+    plt.plot(dates, spiritual, marker='^', label='Духовне зростання', linewidth=2.5, markersize=10)
     
-    plt.figure(figsize=(12, 6))
-    plt.plot(dates, interest, marker='o', label='Цікавість', linewidth=2)
-    plt.plot(dates, relevance, marker='s', label='Актуальність', linewidth=2)
-    plt.plot(dates, spiritual, marker='^', label='Духовне зростання', linewidth=2)
+    # Настройка осей
+    if group_by == 'week':
+        plt.xlabel('Тиждень', fontsize=12)
+        from matplotlib.dates import WeekdayLocator, DateFormatter
+        plt.gca().xaxis.set_major_locator(WeekdayLocator(byweekday=0))  # Понедельники
+        plt.gca().xaxis.set_major_formatter(DateFormatter('%d.%m'))
+    elif group_by == 'month':
+        plt.xlabel('Місяць', fontsize=12)
+        from matplotlib.dates import MonthLocator, DateFormatter
+        plt.gca().xaxis.set_major_locator(MonthLocator())
+        plt.gca().xaxis.set_major_formatter(DateFormatter('%b %Y'))
+    else:  # quarter
+        plt.xlabel('Квартал', fontsize=12)
+        from matplotlib.dates import MonthLocator, DateFormatter
+        plt.gca().xaxis.set_major_locator(MonthLocator(interval=3))
+        plt.gca().xaxis.set_major_formatter(DateFormatter('Q%q %Y'))
     
-    plt.xlabel('Дата')
-    plt.ylabel('Оцінка (1-5)')
-    plt.title(f'Динаміка оцінок за {"місяць" if period == 30 else "рік"}')
-    plt.legend()
-    plt.grid(True, alpha=0.3)
-    plt.xticks(rotation=45)
+    plt.ylabel('Оцінка (1-5)', fontsize=12)
+    plt.title(title, fontsize=14, fontweight='bold')
+    plt.legend(fontsize=11, loc='best')
+    plt.grid(True, alpha=0.3, linestyle='--')
+    plt.xticks(rotation=45, ha='right')
     plt.tight_layout()
     plt.ylim(0, 5.5)
     
+    # Добавляем среднюю линию
+    overall_avg = (sum(interest) + sum(relevance) + sum(spiritual)) / (len(interest) * 3)
+    plt.axhline(y=overall_avg, color='gray', linestyle='--', alpha=0.5, label=f'Середнє: {overall_avg:.2f}')
+    
     # Сохраняем график в BytesIO
     buf = io.BytesIO()
-    plt.savefig(buf, format='png', dpi=150)
+    plt.savefig(buf, format='png', dpi=150, bbox_inches='tight')
     buf.seek(0)
     plt.close()
+    
+    # Формируем подпись
+    period_names = {'month': 'місяць', 'year': 'рік', 'all': 'весь період'}
+    caption = f"📈 Графік за {period_names[graph_type]}\n"
+    caption += f"📊 Кількість точок: {len(dates)}\n"
+    caption += f"⭐️ Середня оцінка: {overall_avg:.2f}/5"
     
     # Отправляем график
     await update.message.reply_photo(
         photo=buf,
-        caption=f"📈 Графік за {"місяць" if period == 30 else "рік"}"
+        caption=caption
     )
 
 
@@ -680,13 +767,73 @@ async def admin_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
 📈 *Статистика:*
 /stats - Статистика по останньому опитуванню
 /stats ID - Статистика по конкретному опитуванню
-/graph month - Графік за місяць
-/graph year - Графік за рік
+/graph month - Графік за місяць (по тижнях)
+/graph year - Графік за рік (по місяцях)
+/graph all - Графік за весь період (по кварталах)
+
+💾 *База даних:*
+/export\\_db - Завантажити базу даних
 
 ❓ /help - Показати це повідомлення
     """
     
     await update.message.reply_text(help_text, parse_mode='Markdown')
+
+
+async def admin_export_db(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Отправляет файл базы данных админу"""
+    if update.effective_user.id != config.ADMIN_ID:
+        await update.message.reply_text("У тебе немає доступу до цієї команди.")
+        return
+    
+    db_path = 'youth_feedback.db'
+    
+    if not os.path.exists(db_path):
+        await update.message.reply_text("❌ Файл бази даних не знайдено.")
+        return
+    
+    # Получаем статистику по базе
+    conn = db.get_connection()
+    cursor = conn.cursor()
+    
+    # Количество пользователей
+    cursor.execute('SELECT COUNT(*) FROM users')
+    users_count = cursor.fetchone()[0]
+    
+    # Количество встреч
+    cursor.execute('SELECT COUNT(*) FROM youth_meetings')
+    meetings_count = cursor.fetchone()[0]
+    
+    # Количество оценок
+    cursor.execute('SELECT COUNT(*) FROM ratings WHERE attended = 1')
+    ratings_count = cursor.fetchone()[0]
+    
+    # Количество отзывов
+    cursor.execute('SELECT COUNT(*) FROM feedback')
+    feedback_count = cursor.fetchone()[0]
+    
+    # Размер файла
+    file_size = os.path.getsize(db_path)
+    file_size_mb = file_size / 1024 / 1024
+    
+    conn.close()
+    
+    # Формируем описание
+    caption = f"💾 *База даних*\n\n"
+    caption += f"👥 Користувачів: {users_count}\n"
+    caption += f"📅 Зустрічей: {meetings_count}\n"
+    caption += f"⭐️ Оцінок: {ratings_count}\n"
+    caption += f"💬 Відгуків: {feedback_count}\n"
+    caption += f"📦 Розмір: {file_size_mb:.2f} МБ\n\n"
+    caption += f"🔧 Відкрити можна за допомогою SQLite Browser або будь-якого SQL клієнта"
+    
+    # Отправляем файл
+    await update.message.reply_document(
+        document=open(db_path, 'rb'),
+        filename=f'youth_feedback_{datetime.now().strftime("%Y%m%d_%H%M%S")}.db',
+        caption=caption,
+        parse_mode='Markdown'
+    )
 
 
 def main():
@@ -723,6 +870,7 @@ def main():
     application.add_handler(CommandHandler("close_survey", admin_close_survey))
     application.add_handler(CommandHandler("stats", admin_stats))
     application.add_handler(CommandHandler("graph", admin_graph))
+    application.add_handler(CommandHandler("export_db", admin_export_db))
     application.add_handler(CallbackQueryHandler(handle_approval, pattern='^(approve|reject|remove)_'))
     application.add_handler(rating_conv_handler)
     
