@@ -899,14 +899,12 @@ async def admin_export_excel(update: Update, context: ContextTypes.DEFAULT_TYPE)
         
         # === ЛИСТ 3: Оцінки ===
         ws_ratings = wb.create_sheet("Оцінки")
-        ws_ratings.append(["ID зустрічі", "Дата зустрічі", "User ID", "Ім'я", "Відвідав", "Цікавість", "Актуальність", "Духовне зростання", "Дата оцінки"])
+        ws_ratings.append(["ID зустрічі", "Дата зустрічі", "Відвідав", "Цікавість", "Актуальність", "Духовне зростання", "Дата оцінки"])
         
         cursor.execute('''
             SELECT 
                 m.meeting_id,
                 m.start_date,
-                r.user_id,
-                u.first_name || ' ' || COALESCE(u.last_name, ''),
                 CASE WHEN r.attended = 1 THEN 'Так' ELSE 'Ні' END,
                 r.interest_rating,
                 r.relevance_rating,
@@ -914,7 +912,6 @@ async def admin_export_excel(update: Update, context: ContextTypes.DEFAULT_TYPE)
                 r.rating_date
             FROM ratings r
             JOIN youth_meetings m ON r.meeting_id = m.meeting_id
-            JOIN users u ON r.user_id = u.user_id
             ORDER BY m.start_date DESC, r.rating_date
         ''')
         for row in cursor.fetchall():
