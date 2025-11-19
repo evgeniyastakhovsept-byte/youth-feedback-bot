@@ -604,6 +604,86 @@ async def admin_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(text, parse_mode='Markdown')
 
 
+async def admin_ratings(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Показывает список всех оценок по встрече в анонимном формате (только для админа)"""
+    if update.effective_user.id != config.ADMIN_ID:
+        await update.message.reply_text("У тебе немає доступу до цієї команди.")
+        return
+    
+    # Получаем ID встречи из аргументов
+    if not context.args:
+        await update.message.reply_text(
+            "Вкажи ID зустрічі.\n\n"
+            "Наприклад: `/ratings 2`\n\n"
+            "Щоб дізнатися ID зустрічей, використай `/stats`",
+            parse_mode='Markdown'
+        )
+        return
+    
+    try:
+        meeting_id = int(context.args[0])
+    except ValueError:
+        await update.message.reply_text("❌ Невірний формат ID зустрічі.")
+        return
+    
+    # Получаем все оценки по встрече
+    conn = db.get_connection()
+    cursor = conn.cursor()
+    
+    # Проверяем существует ли встреча
+    cursor.execute('SELECT meeting_id, start_date FROM youth_meetings WHERE meeting_id = ?', (meeting_id,))
+    meeting = cursor.fetchone()
+    
+    if not meeting:
+        await update.message.reply_text(f"❌ Зустріч #{meeting_id} не знайдено.")
+        conn.close()
+        return
+    
+    # Получаем все оценки в порядке их добавления
+    cursor.execute('''
+        SELECT 
+            interest_rating,
+            relevance_rating,
+            spiritual_growth_rating,
+            attended,
+            rating_date
+        FROM ratings
+        WHERE meeting_id = ?
+        ORDER BY rating_date
+    ''', (meeting_id,))
+    
+    ratings = cursor.fetchall()
+    conn.close()
+    
+    if not ratings:
+        await update.message.reply_text(f"❌ Немає оцінок для зустрічі #{meeting_id}.")
+        return
+    
+    # Формируем текст с анонимными оценками
+    from datetime import datetime
+    meeting_date = datetime.fromisoformat(meeting[1]).strftime("%d.%m.%Y %H:%M")
+    
+    text = f"📋 *Анонімні оцінки зустрічі #{meeting_id}*\n"
+    text += f"📅 {meeting_date}\n\n"
+    
+    user_num = 1
+    for interest, relevance, spiritual, attended, rating_date in ratings:
+        if attended:
+            text += f"👤 *Учасник {user_num}:*\n"
+            text += f"• Цікавість: {interest}/5\n"
+            text += f"• Актуальність: {relevance}/5\n"
+            text += f"• Духовне зростання: {spiritual}/5\n"
+            text += f"_Оцінено: {datetime.fromisoformat(rating_date).strftime('%d.%m %H:%M')}_\n\n"
+            user_num += 1
+        else:
+            text += f"❌ *Не був присутній*\n"
+            text += f"_Відмітка: {datetime.fromisoformat(rating_date).strftime('%d.%m %H:%M')}_\n\n"
+    
+    text += f"📊 Всього оцінок: {user_num - 1}"
+    
+    await update.message.reply_text(text, parse_mode='Markdown')
+
+
 async def admin_graph(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Создает график динамики оценок (только для админа)"""
     if update.effective_user.id != config.ADMIN_ID:
@@ -682,19 +762,30 @@ async def admin_graph(update: Update, context: ContextTypes.DEFAULT_TYPE):
     interest = []
     relevance = []
     spiritual = []
+    overall = []  # Финальная оценка
     
     for key in sorted(grouped_data.keys()):
         data = grouped_data[key]
         dates.append(data['dates'][0])
-        interest.append(sum(data['interest']) / len(data['interest']))
-        relevance.append(sum(data['relevance']) / len(data['relevance']))
-        spiritual.append(sum(data['spiritual']) / len(data['spiritual']))
+        
+        # Среднее по каждой метрике в этом периоде
+        avg_interest = sum(data['interest']) / len(data['interest'])
+        avg_relevance = sum(data['relevance']) / len(data['relevance'])
+        avg_spiritual = sum(data['spiritual']) / len(data['spiritual'])
+        
+        interest.append(avg_interest)
+        relevance.append(avg_relevance)
+        spiritual.append(avg_spiritual)
+        
+        # Финальная оценка = среднее трех метрик
+        overall.append((avg_interest + avg_relevance + avg_spiritual) / 3)
     
     # Создаем график
     plt.figure(figsize=(14, 7))
-    plt.plot(dates, interest, marker='o', label='Цікавість', linewidth=2.5, markersize=10)
-    plt.plot(dates, relevance, marker='s', label='Актуальність', linewidth=2.5, markersize=10)
-    plt.plot(dates, spiritual, marker='^', label='Духовне зростання', linewidth=2.5, markersize=10)
+    plt.plot(dates, interest, marker='o', label='Цікавість', linewidth=2.5, markersize=10, color='#1f77b4')
+    plt.plot(dates, relevance, marker='s', label='Актуальність', linewidth=2.5, markersize=10, color='#ff7f0e')
+    plt.plot(dates, spiritual, marker='^', label='Духовне зростання', linewidth=2.5, markersize=10, color='#2ca02c')
+    plt.plot(dates, overall, marker='D', label='🎯 Фінальна оцінка', linewidth=3, markersize=12, color='#d62728', linestyle='--')
     
     # Настройка осей
     if group_by == 'week':
@@ -721,10 +812,6 @@ async def admin_graph(update: Update, context: ContextTypes.DEFAULT_TYPE):
     plt.tight_layout()
     plt.ylim(0, 5.5)
     
-    # Добавляем среднюю линию
-    overall_avg = (sum(interest) + sum(relevance) + sum(spiritual)) / (len(interest) * 3)
-    plt.axhline(y=overall_avg, color='gray', linestyle='--', alpha=0.5, label=f'Середнє: {overall_avg:.2f}')
-    
     # Сохраняем график в BytesIO
     buf = io.BytesIO()
     plt.savefig(buf, format='png', dpi=150, bbox_inches='tight')
@@ -733,9 +820,17 @@ async def admin_graph(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     # Формируем подпись
     period_names = {'month': 'місяць', 'year': 'рік', 'all': 'весь період'}
+    
+    # Средние по каждой метрике за период
+    final_avg = sum(overall) / len(overall) if overall else 0
+    
     caption = f"📈 Графік за {period_names[graph_type]}\n"
-    caption += f"📊 Кількість точок: {len(dates)}\n"
-    caption += f"⭐️ Середня оцінка: {overall_avg:.2f}/5"
+    caption += f"📊 Кількість періодів: {len(dates)}\n\n"
+    caption += f"⭐️ Середні оцінки за період:\n"
+    caption += f"  • Цікавість: {sum(interest)/len(interest):.2f}/5\n"
+    caption += f"  • Актуальність: {sum(relevance)/len(relevance):.2f}/5\n"
+    caption += f"  • Духовне зростання: {sum(spiritual)/len(spiritual):.2f}/5\n"
+    caption += f"  • 🎯 Фінальна оцінка: {final_avg:.2f}/5"
     
     # Отправляем график
     await update.message.reply_photo(
@@ -765,8 +860,9 @@ async def admin_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
 /close\\_survey - Закрити активне опитування вручну
 
 📈 *Статистика:*
-/stats - Статистика по останньому опитуванню
+/stats - Список всіх зустрічей
 /stats ID - Статистика по конкретному опитуванню
+/ratings ID - Анонімний список оцінок по зустрічі
 /graph month - Графік за місяць (по тижнях)
 /graph year - Графік за рік (по місяцях)
 /graph all - Графік за весь період (по кварталах)
@@ -857,21 +953,7 @@ async def admin_export_excel(update: Update, context: ContextTypes.DEFAULT_TYPE)
         conn = db.get_connection()
         cursor = conn.cursor()
         
-        # === ЛИСТ 1: Користувачі ===
-        ws_users = wb.create_sheet("Користувачі")
-        ws_users.append(["ID", "Username", "Ім'я", "Прізвище", "Дата додавання"])
-        
-        cursor.execute('SELECT user_id, username, first_name, last_name, joined_date FROM users ORDER BY joined_date')
-        for row in cursor.fetchall():
-            ws_users.append(list(row))
-        
-        # Форматирование заголовков
-        for cell in ws_users[1]:
-            cell.font = Font(bold=True, color="FFFFFF")
-            cell.fill = PatternFill(start_color="4472C4", end_color="4472C4", fill_type="solid")
-            cell.alignment = Alignment(horizontal="center")
-        
-        # === ЛИСТ 2: Зустрічі ===
+        # === ЛИСТ 1: Зустрічі ===
         ws_meetings = wb.create_sheet("Зустрічі")
         ws_meetings.append(["ID", "Дата початку", "Активна", "Середня цікавість", "Середня актуальність", "Середнє духовне зростання", "Відвідали"])
         
@@ -945,7 +1027,7 @@ async def admin_export_excel(update: Update, context: ContextTypes.DEFAULT_TYPE)
             cell.alignment = Alignment(horizontal="center")
         
         # Устанавливаем ширину колонок
-        for ws in [ws_users, ws_meetings, ws_ratings, ws_feedback]:
+        for ws in [ws_meetings, ws_ratings, ws_feedback]:
             for column in ws.columns:
                 max_length = 0
                 column_letter = column[0].column_letter
@@ -981,10 +1063,10 @@ async def admin_export_excel(update: Update, context: ContextTypes.DEFAULT_TYPE)
         # Формируем описание
         caption = f"📊 *Excel експорт бази даних*\n\n"
         caption += f"📋 Листи:\n"
-        caption += f"• Користувачі ({users_count})\n"
         caption += f"• Зустрічі ({meetings_count})\n"
         caption += f"• Оцінки ({ratings_count})\n"
         caption += f"• Відгуки ({feedback_count})\n\n"
+        caption += f"👥 Користувачів в системі: {users_count}\n"
         caption += f"📦 Розмір: {file_size_kb:.1f} КБ\n"
         caption += f"🗓 Створено: {datetime.now().strftime('%d.%m.%Y %H:%M')}"
         
@@ -1037,6 +1119,7 @@ def main():
     application.add_handler(CommandHandler("start_survey", admin_start_survey))
     application.add_handler(CommandHandler("close_survey", admin_close_survey))
     application.add_handler(CommandHandler("stats", admin_stats))
+    application.add_handler(CommandHandler("ratings", admin_ratings))
     application.add_handler(CommandHandler("graph", admin_graph))
     application.add_handler(CommandHandler("export_db", admin_export_db))
     application.add_handler(CommandHandler("export_excel", admin_export_excel))
