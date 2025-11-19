@@ -13,4 +13,4 @@ RATING_DEADLINE_HOURS = 18
 REMINDER_BEFORE_DEADLINE_HOURS = 1
 
 # База данных
-DATABASE_NAME = 'youth_feedback.db'
+DATABASE_NAME = '/var/data/youth_feedback.db'
