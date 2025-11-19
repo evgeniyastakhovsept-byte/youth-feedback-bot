@@ -787,7 +787,7 @@ async def admin_export_db(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("У тебе немає доступу до цієї команди.")
         return
     
-    db_path = 'youth_feedback.db'
+    db_path = config.DATABASE_NAME
     
     if not os.path.exists(db_path):
         await update.message.reply_text("❌ Файл бази даних не знайдено.")
