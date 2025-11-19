@@ -6,6 +6,11 @@ import config
 class Database:
     def __init__(self, db_name: str = config.DATABASE_NAME):
         self.db_name = db_name
+        # Создаем директорию если её нет
+        import os
+        db_dir = os.path.dirname(self.db_name)
+        if db_dir:
+            os.makedirs(db_dir, exist_ok=True)
         self.init_database()
     
     def get_connection(self):
