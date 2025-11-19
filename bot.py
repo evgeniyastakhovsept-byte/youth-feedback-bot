@@ -170,6 +170,29 @@ async def handle_approval(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 chat_id=user_id,
                 text="🎉 Твій запит затверджено! Тепер ти будеш отримувати опитування після молодіжних зустрічей."
             )
+            
+            # Проверяем есть ли активное опитування
+            active_meeting = db.get_active_meeting()
+            if active_meeting:
+                # Отправляем активное опитування новому пользователю
+                keyboard = [
+                    [InlineKeyboardButton("📝 Оцінити", callback_data=f"rate_{active_meeting}")],
+                    [InlineKeyboardButton("❌ Не був на молодіжці", callback_data=f"absent_{active_meeting}")]
+                ]
+                reply_markup = InlineKeyboardMarkup(keyboard)
+                
+                await context.bot.send_message(
+                    chat_id=user_id,
+                    text="🙏 Привіт! Будь ласка, оціни минулу молодіжку.\n\n"
+                         f"У тебе є {config.RATING_DEADLINE_HOURS} годин на оцінку.\n"
+                         "За годину до закінчення прийде нагадування.",
+                    reply_markup=reply_markup
+                )
+                
+                # Регистрируем пользователя для этой встречи
+                db.register_user_for_meeting(active_meeting, user_id)
+                
+                logger.info(f"Sent active survey {active_meeting} to newly approved user {user_id}")
         except Exception as e:
             logger.error(f"Error notifying approved user: {e}")
     
