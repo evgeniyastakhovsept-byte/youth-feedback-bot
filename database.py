@@ -422,7 +422,43 @@ class Database:
         for row in results:
             stats.append({
                 'meeting_id': row[0],
-                'date': datetime.fromisoformat(row[1]),
+                'date': row[1],  # Уже ISO string из базы
+                'avg_interest': round(row[2], 2) if row[2] else 0,
+                'avg_relevance': round(row[3], 2) if row[3] else 0,
+                'avg_spiritual': round(row[4], 2) if row[4] else 0,
+                'attended_count': row[5]
+            })
+        
+        return stats
+    
+    def get_all_stats(self) -> List[dict]:
+        """Получает всю статистику за весь период (для графиков)"""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        
+        cursor.execute('''
+            SELECT 
+                m.meeting_id,
+                m.start_date,
+                AVG(CASE WHEN r.attended = 1 THEN r.interest_rating END) as avg_interest,
+                AVG(CASE WHEN r.attended = 1 THEN r.relevance_rating END) as avg_relevance,
+                AVG(CASE WHEN r.attended = 1 THEN r.spiritual_growth_rating END) as avg_spiritual,
+                COUNT(CASE WHEN r.attended = 1 THEN 1 END) as attended_count
+            FROM youth_meetings m
+            LEFT JOIN ratings r ON m.meeting_id = r.meeting_id
+            WHERE m.is_active = 0
+            GROUP BY m.meeting_id
+            ORDER BY m.start_date
+        ''')
+        
+        results = cursor.fetchall()
+        conn.close()
+        
+        stats = []
+        for row in results:
+            stats.append({
+                'meeting_id': row[0],
+                'date': datetime.fromisoformat(row[1]).isoformat(),
                 'avg_interest': round(row[2], 2) if row[2] else 0,
                 'avg_relevance': round(row[3], 2) if row[3] else 0,
                 'avg_spiritual': round(row[4], 2) if row[4] else 0,
