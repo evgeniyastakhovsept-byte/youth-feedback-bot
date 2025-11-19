@@ -44,15 +44,15 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Проверяем статус пользователя
     if db.is_user_approved(user_id):
         await update.message.reply_text(
-            f"Привіт, {user.first_name}! Твоя присутність вже схвалена, можеш користуватися ботом.\n\n"
-            "Після кожного молодіжного тобі прийде опитування для оцінки заходу."
+            f"Привіт, {user.first_name}! Ти вже затверджений і можеш користуватися ботом.\n\n"
+            "Після кожної молодіжки тобі прийде опитування для оцінки зустрічі."
         )
     elif db.is_user_pending(user_id):
         await update.message.reply_text(
-            "Твій запит уже надіслано адміністратору. Чекай схвалення!"
+            "Твій запит вже відправлено адміністратору. Очікуй затвердження!"
         )
     else:
-        # Додаємо в чергу на схвалення
+        # Добавляем в очередь на одобрение
         db.add_pending_user(
             user_id=user_id,
             username=user.username or "",
@@ -61,18 +61,18 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         
         await update.message.reply_text(
-            "Запит на доступ надіслано адміністратору. Чекай схвалення!"
+            "Запит на доступ відправлено адміністратору. Очікуй затвердження!"
         )
         
         # Уведомляем админа
         try:
             await context.bot.send_message(
                 chat_id=config.ADMIN_ID,
-                text=f"🔔 Новый запрос на доступ:\n\n"
-                     f"Имя: {user.first_name} {user.last_name or ''}\n"
-                     f"Username: @{user.username or 'не указан'}\n"
+                text=f"🔔 Новий запит на доступ:\n\n"
+                     f"Ім'я: {user.first_name} {user.last_name or ''}\n"
+                     f"Username: @{user.username or 'не вказано'}\n"
                      f"ID: {user_id}\n\n"
-                     f"Используй /pending чтобы посмотреть все запросы."
+                     f"Використай /pending щоб переглянути всі запити."
             )
         except Exception as e:
             logger.error(f"Error notifying admin: {e}")
@@ -81,31 +81,31 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def admin_pending(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Показывает список пользователей ожидающих одобрения (только для админа)"""
     if update.effective_user.id != config.ADMIN_ID:
-        await update.message.reply_text("У тебя нет доступа к этой команде.")
+        await update.message.reply_text("У тебе немає доступу до цієї команди.")
         return
     
     pending_users = db.get_pending_users()
     
     if not pending_users:
-        await update.message.reply_text("Нет пользователей ожидающих одобрения.")
+        await update.message.reply_text("Немає користувачів, що очікують затвердження.")
         return
     
     for user in pending_users:
         user_id, username, first_name, last_name, request_date = user
         keyboard = [
             [
-                InlineKeyboardButton("✅ Одобрить", callback_data=f"approve_{user_id}"),
-                InlineKeyboardButton("❌ Отклонить", callback_data=f"reject_{user_id}")
+                InlineKeyboardButton("✅ Затвердити", callback_data=f"approve_{user_id}"),
+                InlineKeyboardButton("❌ Відхилити", callback_data=f"reject_{user_id}")
             ]
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
         
         await update.message.reply_text(
-            f"👤 Запрос:\n"
-            f"Имя: {first_name} {last_name or ''}\n"
-            f"Username: @{username or 'не указан'}\n"
+            f"👤 Запит:\n"
+            f"Ім'я: {first_name} {last_name or ''}\n"
+            f"Username: @{username or 'не вказано'}\n"
             f"ID: {user_id}\n"
-            f"Дата запроса: {request_date[:16]}",
+            f"Дата запиту: {request_date[:16]}",
             reply_markup=reply_markup
         )
 
@@ -116,7 +116,7 @@ async def handle_approval(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.answer()
     
     if query.from_user.id != config.ADMIN_ID:
-        await query.edit_message_text("У тебя нет доступа к этому действию.")
+        await query.edit_message_text("У тебе немає доступу до цієї дії.")
         return
     
     action, user_id = query.data.split('_')
@@ -124,26 +124,26 @@ async def handle_approval(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     if action == "approve":
         db.approve_user(user_id)
-        await query.edit_message_text(f"✅ Пользователь {user_id} одобрен!")
+        await query.edit_message_text(f"✅ Користувача {user_id} затверджено!")
         
         # Уведомляем пользователя
         try:
             await context.bot.send_message(
                 chat_id=user_id,
-                text="🎉 Твой запрос одобрен! Теперь ты будешь получать опросы после молодежных встреч."
+                text="🎉 Твій запит затверджено! Тепер ти будеш отримувати опитування після молодіжних зустрічей."
             )
         except Exception as e:
             logger.error(f"Error notifying approved user: {e}")
     
     elif action == "reject":
         db.reject_user(user_id)
-        await query.edit_message_text(f"❌ Запрос пользователя {user_id} отклонен.")
+        await query.edit_message_text(f"❌ Запит користувача {user_id} відхилено.")
         
         # Уведомляем пользователя
         try:
             await context.bot.send_message(
                 chat_id=user_id,
-                text="К сожалению, твой запрос на доступ был отклонен."
+                text="На жаль, твій запит на доступ було відхилено."
             )
         except Exception as e:
             logger.error(f"Error notifying rejected user: {e}")
@@ -152,14 +152,14 @@ async def handle_approval(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def admin_start_survey(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Запускает новый опрос (только для админа)"""
     if update.effective_user.id != config.ADMIN_ID:
-        await update.message.reply_text("У тебя нет доступа к этой команде.")
+        await update.message.reply_text("У тебе немає доступу до цієї команди.")
         return
     
     # Проверяем нет ли активного опроса
     active_meeting = db.get_active_meeting()
     if active_meeting:
         await update.message.reply_text(
-            "❌ Уже есть активный опрос! Сначала дождись его завершения или закрой его командой /close_survey"
+            "❌ Вже є активне опитування! Спочатку дочекайся його завершення або закрий його командою /close_survey"
         )
         return
     
@@ -170,7 +170,7 @@ async def admin_start_survey(update: Update, context: ContextTypes.DEFAULT_TYPE)
     approved_users = db.get_all_approved_users()
     
     if not approved_users:
-        await update.message.reply_text("❌ Нет одобренных пользователей для опроса!")
+        await update.message.reply_text("❌ Немає затверджених користувачів для опитування!")
         return
     
     success_count = 0
@@ -180,16 +180,16 @@ async def admin_start_survey(update: Update, context: ContextTypes.DEFAULT_TYPE)
         
         try:
             keyboard = [
-                [InlineKeyboardButton("📝 Оценить", callback_data=f"rate_{meeting_id}")],
-                [InlineKeyboardButton("❌ Не был на молодежном", callback_data=f"absent_{meeting_id}")]
+                [InlineKeyboardButton("📝 Оцінити", callback_data=f"rate_{meeting_id}")],
+                [InlineKeyboardButton("❌ Не був на молодіжці", callback_data=f"absent_{meeting_id}")]
             ]
             reply_markup = InlineKeyboardMarkup(keyboard)
             
             await context.bot.send_message(
                 chat_id=user_id,
-                text="🙏 Привет! Пожалуйста, оцени прошедшее молодежное.\n\n"
-                     f"У тебя есть {config.RATING_DEADLINE_HOURS} часов на оценку.\n"
-                     "За час до окончания придет напоминание.",
+                text="🙏 Привіт! Будь ласка, оціни минулу молодіжку.\n\n"
+                     f"У тебе є {config.RATING_DEADLINE_HOURS} годин на оцінку.\n"
+                     "За годину до закінчення прийде нагадування.",
                 reply_markup=reply_markup
             )
             success_count += 1
@@ -197,10 +197,10 @@ async def admin_start_survey(update: Update, context: ContextTypes.DEFAULT_TYPE)
             logger.error(f"Error sending survey to user {user_id}: {e}")
     
     await update.message.reply_text(
-        f"✅ Опрос запущен! ID встречи: {meeting_id}\n"
-        f"Отправлено {success_count} пользователям.\n\n"
-        f"Дедлайн: {config.RATING_DEADLINE_HOURS} часов\n"
-        f"Напоминание будет отправлено за {config.REMINDER_BEFORE_DEADLINE_HOURS} час до конца."
+        f"✅ Опитування запущено! ID зустрічі: {meeting_id}\n"
+        f"Відправлено {success_count} користувачам.\n\n"
+        f"Дедлайн: {config.RATING_DEADLINE_HOURS} годин\n"
+        f"Нагадування буде відправлено за {config.REMINDER_BEFORE_DEADLINE_HOURS} годину до кінця."
     )
     
     # Планируем напоминание и закрытие опроса
@@ -233,15 +233,15 @@ async def send_reminders(context: ContextTypes.DEFAULT_TYPE):
         
         try:
             keyboard = [
-                [InlineKeyboardButton("📝 Оценить", callback_data=f"rate_{meeting_id}")],
-                [InlineKeyboardButton("❌ Не был на молодежном", callback_data=f"absent_{meeting_id}")]
+                [InlineKeyboardButton("📝 Оцінити", callback_data=f"rate_{meeting_id}")],
+                [InlineKeyboardButton("❌ Не був на молодіжці", callback_data=f"absent_{meeting_id}")]
             ]
             reply_markup = InlineKeyboardMarkup(keyboard)
             
             await context.bot.send_message(
                 chat_id=user_id,
-                text=f"⏰ Напоминание: у тебя остался {config.REMINDER_BEFORE_DEADLINE_HOURS} час чтобы оценить молодежное!\n\n"
-                     "Пожалуйста, не забудь оставить обратную связь.",
+                text=f"⏰ Нагадування: у тебе залишилася {config.REMINDER_BEFORE_DEADLINE_HOURS} година щоб оцінити молодіжку!\n\n"
+                     "Будь ласка, не забудь залишити зворотний зв'язок.",
                 reply_markup=reply_markup
             )
             db.mark_as_reminded(meeting_id, user_id)
@@ -259,8 +259,8 @@ async def close_survey_job(context: ContextTypes.DEFAULT_TYPE):
         stats = db.get_meeting_stats(meeting_id)
         await context.bot.send_message(
             chat_id=config.ADMIN_ID,
-            text=f"⏱ Опрос #{meeting_id} автоматически закрыт.\n\n"
-                 f"Используй /stats {meeting_id} чтобы посмотреть результаты."
+            text=f"⏱ Опитування #{meeting_id} автоматично закрито.\n\n"
+                 f"Використай /stats {meeting_id} щоб переглянути результати."
         )
     except Exception as e:
         logger.error(f"Error notifying admin about closed survey: {e}")
@@ -269,12 +269,12 @@ async def close_survey_job(context: ContextTypes.DEFAULT_TYPE):
 async def admin_close_survey(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Вручную закрывает активный опрос (только для админа)"""
     if update.effective_user.id != config.ADMIN_ID:
-        await update.message.reply_text("У тебя нет доступа к этой команде.")
+        await update.message.reply_text("У тебе немає доступу до цієї команди.")
         return
     
     active_meeting = db.get_active_meeting()
     if not active_meeting:
-        await update.message.reply_text("❌ Нет активного опроса.")
+        await update.message.reply_text("❌ Немає активного опитування.")
         return
     
     db.close_meeting(active_meeting)
@@ -289,8 +289,8 @@ async def admin_close_survey(update: Update, context: ContextTypes.DEFAULT_TYPE)
         job.schedule_removal()
     
     await update.message.reply_text(
-        f"✅ Опрос #{active_meeting} закрыт вручную.\n\n"
-        f"Используй /stats {active_meeting} чтобы посмотреть результаты."
+        f"✅ Опитування #{active_meeting} закрито вручну.\n\n"
+        f"Використай /stats {active_meeting} щоб переглянути результати."
     )
 
 
@@ -303,7 +303,7 @@ async def handle_rating_button(update: Update, context: ContextTypes.DEFAULT_TYP
     
     # Проверяем что пользователь одобрен
     if not db.is_user_approved(user_id):
-        await query.edit_message_text("У тебя нет доступа к этому боту.")
+        await query.edit_message_text("У тебе немає доступу до цього бота.")
         return
     
     data = query.data.split('_')
@@ -314,7 +314,7 @@ async def handle_rating_button(update: Update, context: ContextTypes.DEFAULT_TYP
         # Пользователь не был на встрече
         db.mark_not_attended(meeting_id, user_id)
         await query.edit_message_text(
-            "✅ Спасибо за ответ! Надеюсь увидим тебя на следующем молодежном! 🙏"
+            "✅ Дякуємо за відповідь! Сподіваємося побачити тебе на наступній молодіжці! 🙏"
         )
         return
     
@@ -333,9 +333,9 @@ async def handle_rating_button(update: Update, context: ContextTypes.DEFAULT_TYP
         reply_markup = InlineKeyboardMarkup(keyboard)
         
         await query.edit_message_text(
-            "📊 Оцени *интересность* молодежного от 1 до 5:\n\n"
-            "1 - Скучно\n"
-            "5 - Очень интересно",
+            "📊 Оціни *цікавість* молодіжки від 1 до 5:\n\n"
+            "1 - Нудно\n"
+            "5 - Дуже цікаво",
             reply_markup=reply_markup,
             parse_mode='Markdown'
         )
@@ -358,9 +358,9 @@ async def handle_interest_rating(update: Update, context: ContextTypes.DEFAULT_T
     reply_markup = InlineKeyboardMarkup(keyboard)
     
     await query.edit_message_text(
-        "📊 Оцени *актуальность для тебя* от 1 до 5:\n\n"
-        "1 - Совсем не актуально\n"
-        "5 - Очень актуально",
+        "📊 Оціни *актуальність для тебе* від 1 до 5:\n\n"
+        "1 - Зовсім не актуально\n"
+        "5 - Дуже актуально",
         reply_markup=reply_markup,
         parse_mode='Markdown'
     )
@@ -383,9 +383,9 @@ async def handle_relevance_rating(update: Update, context: ContextTypes.DEFAULT_
     reply_markup = InlineKeyboardMarkup(keyboard)
     
     await query.edit_message_text(
-        "📊 Оцени *полезность для духовного роста* от 1 до 5:\n\n"
-        "1 - Совсем не полезно\n"
-        "5 - Очень полезно",
+        "📊 Оціни *корисність для духовного зростання* від 1 до 5:\n\n"
+        "1 - Зовсім не корисно\n"
+        "5 - Дуже корисно",
         reply_markup=reply_markup,
         parse_mode='Markdown'
     )
@@ -403,14 +403,14 @@ async def handle_spiritual_rating(update: Update, context: ContextTypes.DEFAULT_
     user_ratings[user_id]['spiritual'] = rating
     
     keyboard = [
-        [InlineKeyboardButton("✍️ Оставить отзыв", callback_data="feedback_yes")],
-        [InlineKeyboardButton("⏭ Пропустить", callback_data="feedback_no")]
+        [InlineKeyboardButton("✍️ Залишити відгук", callback_data="feedback_yes")],
+        [InlineKeyboardButton("⏭ Пропустити", callback_data="feedback_no")]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
     
     await query.edit_message_text(
-        "✅ Спасибо за оценки!\n\n"
-        "Хочешь оставить письменный отзыв? (3-4 предложения)",
+        "✅ Дякуємо за оцінки!\n\n"
+        "Хочеш залишити письмовий відгук? (3-4 речення)",
         reply_markup=reply_markup
     )
     return WAITING_FOR_FEEDBACK
@@ -439,14 +439,14 @@ async def handle_feedback_choice(update: Update, context: ContextTypes.DEFAULT_T
             del user_ratings[user_id]
         
         await query.edit_message_text(
-            "✅ Спасибо за обратную связь! 🙏"
+            "✅ Дякуємо за зворотний зв'язок! 🙏"
         )
         return ConversationHandler.END
     
     else:
         # Просим написать отзыв
         await query.edit_message_text(
-            "✍️ Напиши свой отзыв (3-4 предложения):"
+            "✍️ Напиши свій відгук (3-4 речення):"
         )
         return WAITING_FOR_FEEDBACK
 
@@ -458,7 +458,7 @@ async def handle_feedback_text(update: Update, context: ContextTypes.DEFAULT_TYP
     
     rating_data = user_ratings.get(user_id)
     if not rating_data:
-        await update.message.reply_text("Произошла ошибка. Попробуй начать оценку заново.")
+        await update.message.reply_text("Сталася помилка. Спробуй почати оцінювання заново.")
         return ConversationHandler.END
     
     # Сохраняем оценки
@@ -477,7 +477,7 @@ async def handle_feedback_text(update: Update, context: ContextTypes.DEFAULT_TYP
     del user_ratings[user_id]
     
     await update.message.reply_text(
-        "✅ Спасибо за подробную обратную связь! 🙏"
+        "✅ Дякуємо за детальний зворотний зв'язок! 🙏"
     )
     return ConversationHandler.END
 
@@ -485,7 +485,7 @@ async def handle_feedback_text(update: Update, context: ContextTypes.DEFAULT_TYP
 async def admin_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Показывает статистику по встрече (только для админа)"""
     if update.effective_user.id != config.ADMIN_ID:
-        await update.message.reply_text("У тебя нет доступа к этой команде.")
+        await update.message.reply_text("У тебе немає доступу до цієї команди.")
         return
     
     # Получаем ID встречи из аргументов или берем последнюю активную
@@ -493,33 +493,59 @@ async def admin_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
         try:
             meeting_id = int(context.args[0])
         except ValueError:
-            await update.message.reply_text("❌ Неверный формат ID встречи.")
+            await update.message.reply_text("❌ Невірний формат ID зустрічі.")
             return
     else:
-        meeting_id = db.get_active_meeting()
-        if not meeting_id:
-            await update.message.reply_text("❌ Нет активной встречи. Укажи ID: /stats <meeting_id>")
+        # Если аргумента нет - показываем список всех встреч
+        conn = db.get_connection()
+        cursor = conn.cursor()
+        cursor.execute('''
+            SELECT meeting_id, start_date, is_active 
+            FROM youth_meetings 
+            ORDER BY start_date DESC 
+            LIMIT 10
+        ''')
+        meetings = cursor.fetchall()
+        conn.close()
+        
+        if not meetings:
+            await update.message.reply_text("❌ Ще не було жодної молодіжки.")
             return
+        
+        # Формируем список встреч
+        from datetime import datetime
+        text = "📊 *Список молодіжних зустрічей:*\n\n"
+        for meeting_id, start_date, is_active in meetings:
+            date_obj = datetime.fromisoformat(start_date)
+            date_str = date_obj.strftime("%d.%m.%Y %H:%M")
+            status = "🟢 Активна" if is_active else "⚪️ Завершена"
+            text += f"#{meeting_id} - {date_str} {status}\n"
+        
+        text += f"\n💡 Використай `/stats ID` щоб переглянути статистику\n"
+        text += f"Наприклад: `/stats 1`"
+        
+        await update.message.reply_text(text, parse_mode='Markdown')
+        return
     
     stats = db.get_meeting_stats(meeting_id)
     
     # Формируем текст статистики
-    text = f"📊 *Статистика встречи #{meeting_id}*\n\n"
-    text += f"👥 Присутствовало: {stats['total_attended']}\n"
-    text += f"❌ Не было: {stats['not_attended']}\n\n"
+    text = f"📊 *Статистика зустрічі #{meeting_id}*\n\n"
+    text += f"👥 Були присутні: {stats['total_attended']}\n"
+    text += f"❌ Не було: {stats['not_attended']}\n\n"
     
     if stats['total_attended'] > 0:
-        text += f"⭐️ *Средние оценки:*\n"
-        text += f"Интересность: {stats['avg_interest']}/5\n"
-        text += f"Актуальность: {stats['avg_relevance']}/5\n"
-        text += f"Духовный рост: {stats['avg_spiritual_growth']}/5\n\n"
+        text += f"⭐️ *Середні оцінки:*\n"
+        text += f"Цікавість: {stats['avg_interest']}/5\n"
+        text += f"Актуальність: {stats['avg_relevance']}/5\n"
+        text += f"Духовне зростання: {stats['avg_spiritual_growth']}/5\n\n"
     
     if stats['feedbacks']:
-        text += f"💬 *Отзывы ({len(stats['feedbacks'])}):*\n\n"
+        text += f"💬 *Відгуки ({len(stats['feedbacks'])}):*\n\n"
         for i, (feedback, date) in enumerate(stats['feedbacks'], 1):
             text += f"{i}. {feedback}\n\n"
     else:
-        text += "💬 Текстовых отзывов нет.\n"
+        text += "💬 Текстових відгуків немає.\n"
     
     await update.message.reply_text(text, parse_mode='Markdown')
 
@@ -527,7 +553,7 @@ async def admin_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def admin_graph(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Создает график динамики оценок (только для админа)"""
     if update.effective_user.id != config.ADMIN_ID:
-        await update.message.reply_text("У тебя нет доступа к этой команде.")
+        await update.message.reply_text("У тебе немає доступу до цієї команди.")
         return
     
     # Получаем период из аргументов (30 или 365 дней)
@@ -535,14 +561,14 @@ async def admin_graph(update: Update, context: ContextTypes.DEFAULT_TYPE):
         period = 30 if context.args[0] == 'month' else 365
     else:
         await update.message.reply_text(
-            "Укажи период: /graph month или /graph year"
+            "Вкажи період: /graph month або /graph year"
         )
         return
     
     stats = db.get_stats_for_period(period)
     
     if not stats:
-        await update.message.reply_text("❌ Нет данных за указанный период.")
+        await update.message.reply_text("❌ Немає даних за вказаний період.")
         return
     
     # Создаем график
@@ -552,13 +578,13 @@ async def admin_graph(update: Update, context: ContextTypes.DEFAULT_TYPE):
     spiritual = [s['avg_spiritual'] for s in stats]
     
     plt.figure(figsize=(12, 6))
-    plt.plot(dates, interest, marker='o', label='Интересность', linewidth=2)
-    plt.plot(dates, relevance, marker='s', label='Актуальность', linewidth=2)
-    plt.plot(dates, spiritual, marker='^', label='Духовный рост', linewidth=2)
+    plt.plot(dates, interest, marker='o', label='Цікавість', linewidth=2)
+    plt.plot(dates, relevance, marker='s', label='Актуальність', linewidth=2)
+    plt.plot(dates, spiritual, marker='^', label='Духовне зростання', linewidth=2)
     
     plt.xlabel('Дата')
-    plt.ylabel('Оценка (1-5)')
-    plt.title(f'Динамика оценок за {"месяц" if period == 30 else "год"}')
+    plt.ylabel('Оцінка (1-5)')
+    plt.title(f'Динаміка оцінок за {"місяць" if period == 30 else "рік"}')
     plt.legend()
     plt.grid(True, alpha=0.3)
     plt.xticks(rotation=45)
@@ -574,7 +600,7 @@ async def admin_graph(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Отправляем график
     await update.message.reply_photo(
         photo=buf,
-        caption=f"📈 График за {"месяц" if period == 30 else "год"}"
+        caption=f"📈 Графік за {"місяць" if period == 30 else "рік"}"
     )
 
 
@@ -582,28 +608,28 @@ async def admin_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Показывает список команд для админа"""
     if update.effective_user.id != config.ADMIN_ID:
         await update.message.reply_text(
-            "Доступные команды:\n"
-            "/start - Начать работу с ботом"
+            "Доступні команди:\n"
+            "/start - Почати роботу з ботом"
         )
         return
     
     help_text = """
-🤖 *Команды администратора:*
+🤖 *Команди адміністратора:*
 
-👥 *Управление пользователями:*
-/pending - Показать запросы на доступ
+👥 *Управління користувачами:*
+/pending - Показати запити на доступ
 
-📊 *Управление опросами:*
-/start\\_survey - Запустить новый опрос
-/close\\_survey - Закрыть активный опрос вручную
+📊 *Управління опитуваннями:*
+/start\\_survey - Запустити нове опитування
+/close\\_survey - Закрити активне опитування вручну
 
 📈 *Статистика:*
-/stats - Статистика по последнему опросу
-/stats ID - Статистика по конкретному опросу
-/graph month - График за месяц
-/graph year - График за год
+/stats - Статистика по останньому опитуванню
+/stats ID - Статистика по конкретному опитуванню
+/graph month - Графік за місяць
+/graph year - Графік за рік
 
-❓ /help - Показать это сообщение
+❓ /help - Показати це повідомлення
     """
     
     await update.message.reply_text(help_text, parse_mode='Markdown')
@@ -632,6 +658,7 @@ def main():
             ],
         },
         fallbacks=[CommandHandler('start', start)],
+        per_message=True,
     )
     
     # Регистрируем обработчики
