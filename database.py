@@ -258,6 +258,27 @@ class Database:
         conn.commit()
         conn.close()
     
+    def register_user_for_meeting(self, meeting_id: int, user_id: int):
+        """Регистрирует пользователя для активной встречи (для новых пользователей)"""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        
+        # Проверяем что пользователь еще не зарегистрирован
+        cursor.execute('''
+            SELECT response_id FROM user_responses 
+            WHERE meeting_id = ? AND user_id = ?
+        ''', (meeting_id, user_id))
+        
+        if not cursor.fetchone():
+            # Регистрируем пользователя для этой встречи
+            cursor.execute('''
+                INSERT INTO user_responses (meeting_id, user_id, has_responded, reminded)
+                VALUES (?, ?, 0, 0)
+            ''', (meeting_id, user_id))
+            conn.commit()
+        
+        conn.close()
+    
     def get_meeting_deadline(self, meeting_id: int) -> Optional[datetime]:
         """Получает дедлайн встречи"""
         conn = self.get_connection()
