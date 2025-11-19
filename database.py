@@ -181,6 +181,25 @@ class Database:
         conn.close()
         return users
     
+    def remove_user(self, user_id: int) -> bool:
+        """Удаляет пользователя из списка одобренных"""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        cursor.execute('DELETE FROM users WHERE user_id = ?', (user_id,))
+        deleted = cursor.rowcount > 0
+        conn.commit()
+        conn.close()
+        return deleted
+    
+    def get_all_approved_users_info(self) -> List[Tuple]:
+        """Получает информацию о всех одобренных пользователях"""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        cursor.execute('SELECT user_id, username, first_name, last_name FROM users ORDER BY first_name')
+        users = cursor.fetchall()
+        conn.close()
+        return users
+    
     # === Работа с молодежными встречами ===
     
     def create_meeting(self, deadline_hours: int = config.RATING_DEADLINE_HOURS) -> int:
