@@ -110,8 +110,45 @@ async def admin_pending(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
 
 
+async def admin_remove(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Показывает список одобренных пользователей для удаления (только для админа)"""
+    if update.effective_user.id != config.ADMIN_ID:
+        await update.message.reply_text("У тебе немає доступу до цієї команди.")
+        return
+    
+    approved_users = db.get_all_approved_users_info()
+    
+    if not approved_users:
+        await update.message.reply_text("Немає затверджених користувачів.")
+        return
+    
+    # Фильтруем админа из списка
+    approved_users = [u for u in approved_users if u[0] != config.ADMIN_ID]
+    
+    if not approved_users:
+        await update.message.reply_text("Немає користувачів для видалення (крім тебе).")
+        return
+    
+    text = "👥 *Затверджені користувачі:*\n\n"
+    text += "Виберь користувача для видалення:\n\n"
+    
+    for user_id, username, first_name, last_name in approved_users:
+        keyboard = [
+            [InlineKeyboardButton("🗑 Видалити", callback_data=f"remove_{user_id}")]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        await update.message.reply_text(
+            f"👤 Користувач:\n"
+            f"Ім'я: {first_name} {last_name or ''}\n"
+            f"Username: @{username or 'не вказано'}\n"
+            f"ID: {user_id}",
+            reply_markup=reply_markup
+        )
+
+
 async def handle_approval(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Обработчик кнопок одобрения/отклонения"""
+    """Обработчик кнопок одобрения/отклонения/удаления"""
     query = update.callback_query
     await query.answer()
     
@@ -147,6 +184,21 @@ async def handle_approval(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
         except Exception as e:
             logger.error(f"Error notifying rejected user: {e}")
+    
+    elif action == "remove":
+        if db.remove_user(user_id):
+            await query.edit_message_text(f"🗑 Користувача {user_id} видалено зі списку!")
+            
+            # Уведомляем пользователя
+            try:
+                await context.bot.send_message(
+                    chat_id=user_id,
+                    text="Тебе було видалено зі списку учасників бота. Ти більше не будеш отримувати опитування."
+                )
+            except Exception as e:
+                logger.error(f"Error notifying removed user: {e}")
+        else:
+            await query.edit_message_text(f"❌ Користувача {user_id} не знайдено.")
 
 
 async def admin_start_survey(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -618,6 +670,7 @@ async def admin_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 👥 *Управління користувачами:*
 /pending - Показати запити на доступ
+/remove - Видалити учасника з бота
 
 📊 *Управління опитуваннями:*
 /start\\_survey - Запустити нове опитування
@@ -665,11 +718,12 @@ def main():
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("help", admin_help))
     application.add_handler(CommandHandler("pending", admin_pending))
+    application.add_handler(CommandHandler("remove", admin_remove))
     application.add_handler(CommandHandler("start_survey", admin_start_survey))
     application.add_handler(CommandHandler("close_survey", admin_close_survey))
     application.add_handler(CommandHandler("stats", admin_stats))
     application.add_handler(CommandHandler("graph", admin_graph))
-    application.add_handler(CallbackQueryHandler(handle_approval, pattern='^(approve|reject)_'))
+    application.add_handler(CallbackQueryHandler(handle_approval, pattern='^(approve|reject|remove)_'))
     application.add_handler(rating_conv_handler)
     
     # Запускаем бота
