@@ -500,6 +500,7 @@ async def handle_feedback_choice(update: Update, context: ContextTypes.DEFAULT_T
         await query.edit_message_text(
             "✍️ Напиши свій відгук (3-4 речення):"
         )
+        # Сохраняем контекст для обработки следующего текстового сообщения
         return WAITING_FOR_FEEDBACK
 
 
@@ -711,7 +712,6 @@ def main():
             ],
         },
         fallbacks=[CommandHandler('start', start)],
-        per_message=True,
     )
     
     # Регистрируем обработчики
