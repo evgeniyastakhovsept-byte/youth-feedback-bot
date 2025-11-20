@@ -956,9 +956,6 @@ async def admin_export_db(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 
-async def admin_export_excel(update: Update, context: ContextTypes.DEFAULT_TYPE):
-
-
 async def check_and_close_expired_surveys(context: ContextTypes.DEFAULT_TYPE):
     """Фонова задача: перевіряє і закриває прострочені опитування"""
     try:
