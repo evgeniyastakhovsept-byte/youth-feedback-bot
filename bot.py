@@ -957,6 +957,59 @@ async def admin_export_db(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def admin_export_excel(update: Update, context: ContextTypes.DEFAULT_TYPE):
+
+
+async def check_and_close_expired_surveys(context: ContextTypes.DEFAULT_TYPE):
+    """Фонова задача: перевіряє і закриває прострочені опитування"""
+    try:
+        active_meeting = db.get_active_meeting()
+        if not active_meeting:
+            return
+        
+        # Получаем дедлайн встречи
+        deadline = db.get_meeting_deadline(active_meeting)
+        if not deadline:
+            return
+        
+        # Проверяем истек ли дедлайн
+        now = datetime.now()
+        if now >= deadline:
+            logger.info(f"Auto-closing expired survey {active_meeting}")
+            
+            # Закрываем встречу
+            db.close_meeting(active_meeting)
+            
+            # Получаем статистику
+            stats = db.get_meeting_stats(active_meeting)
+            
+            # Формируем сообщение для админа
+            text = f"⏰ *Опитування #{active_meeting} автоматично закрито*\n\n"
+            text += f"📊 *Підсумки:*\n"
+            text += f"👥 Відповіли: {stats['total_attended']}\n"
+            text += f"❌ Не було: {stats['not_attended']}\n\n"
+            
+            if stats['total_attended'] > 0:
+                text += f"⭐️ *Середні оцінки:*\n"
+                text += f"• Цікавість: {stats['avg_interest']}/5\n"
+                text += f"• Актуальність: {stats['avg_relevance']}/5\n"
+                text += f"• Духовне зростання: {stats['avg_spiritual_growth']}/5\n\n"
+            
+            text += f"💡 Використай `/stats {active_meeting}` для детальної статистики"
+            
+            # Отправляем админу
+            await context.bot.send_message(
+                chat_id=config.ADMIN_ID,
+                text=text,
+                parse_mode='Markdown'
+            )
+            
+            logger.info(f"Survey {active_meeting} auto-closed and admin notified")
+            
+    except Exception as e:
+        logger.error(f"Error in check_and_close_expired_surveys: {e}")
+
+
+async def admin_export_excel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Экспортирует базу данных в Excel"""
     if update.effective_user.id != config.ADMIN_ID:
         await update.message.reply_text("У тебе немає доступу до цієї команди.")
@@ -1118,6 +1171,11 @@ def main():
     
     # Создаем приложение
     application = Application.builder().token(config.BOT_TOKEN).build()
+    
+    # Добавляем фоновую задачу проверки дедлайнов (каждую 1 час)
+    job_queue = application.job_queue
+    job_queue.run_repeating(check_and_close_expired_surveys, interval=3600, first=60)
+    logger.info("Background job for checking deadlines scheduled (every 1 hour)")
     
     # Обработчик процесса оценки
     rating_conv_handler = ConversationHandler(
