@@ -956,6 +956,53 @@ async def admin_export_db(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 
+async def auto_backup(context: ContextTypes.DEFAULT_TYPE):
+    """Автоматичний щотижневий бекап бази даних"""
+    try:
+        db_path = config.DATABASE_NAME
+
+        if not os.path.exists(db_path):
+            logger.error("Auto backup: database file not found")
+            return
+
+        # Отримуємо статистику
+        conn = db.get_connection()
+        cursor = conn.cursor()
+
+        cursor.execute('SELECT COUNT(*) FROM users')
+        users_count = cursor.fetchone()[0]
+
+        cursor.execute('SELECT COUNT(*) FROM youth_meetings')
+        meetings_count = cursor.fetchone()[0]
+
+        cursor.execute('SELECT COUNT(*) FROM ratings WHERE attended = 1')
+        ratings_count = cursor.fetchone()[0]
+
+        file_size = os.path.getsize(db_path)
+        file_size_kb = file_size / 1024
+
+        conn.close()
+
+        caption = f"🔄 *Автоматичний бекап*\n\n"
+        caption += f"👥 Користувачів: {users_count}\n"
+        caption += f"📅 Зустрічей: {meetings_count}\n"
+        caption += f"⭐️ Оцінок: {ratings_count}\n"
+        caption += f"📦 Розмір: {file_size_kb:.1f} КБ\n\n"
+        caption += f"📆 {datetime.now().strftime('%d.%m.%Y %H:%M')}"
+
+        await context.bot.send_document(
+            chat_id=config.ADMIN_ID,
+            document=open(db_path, 'rb'),
+            filename=f'backup_{datetime.now().strftime("%Y%m%d")}.db',
+            caption=caption,
+            parse_mode='Markdown'
+        )
+        logger.info("Auto backup sent successfully")
+
+    except Exception as e:
+        logger.error(f"Auto backup error: {e}")
+
+
 async def check_and_close_expired_surveys(context: ContextTypes.DEFAULT_TYPE):
     """Фонова задача: перевіряє і закриває прострочені опитування"""
     try:
@@ -1172,6 +1219,9 @@ def main():
     # Добавляем фоновую задачу проверки дедлайнов (каждую 1 час)
     job_queue = application.job_queue
     job_queue.run_repeating(check_and_close_expired_surveys, interval=3600, first=60)
+
+    # Автоматичний бекап раз на тиждень (604800 секунд = 7 днів)
+    job_queue.run_repeating(auto_backup, interval=604800, first=3600)
     logger.info("Background job for checking deadlines scheduled (every 1 hour)")
     
     # Обработчик процесса оценки
