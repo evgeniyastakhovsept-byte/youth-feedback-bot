@@ -559,19 +559,6 @@ async def handle_feedback_text(update: Update, context: ContextTypes.DEFAULT_TYP
     return ConversationHandler.END
 
 
-async def handle_orphaned_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Обработчик для кнопок, которые потеряли состояние после рестарта бота"""
-    query = update.callback_query
-    await query.answer()
-
-    # Сообщаем пользователю что нужно начать заново
-    await query.edit_message_text(
-        "⚠️ На жаль, сесія застаріла (бот був перезапущений).\n\n"
-        "Якщо є активне опитування, тобі прийде нове повідомлення з кнопками.\n"
-        "Або зверніся до адміністратора."
-    )
-
-
 async def admin_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Показывает статистику по встрече (только для админа)"""
     if update.effective_user.id != config.ADMIN_ID:
@@ -1267,10 +1254,7 @@ def main():
     application.add_handler(CommandHandler("export_excel", admin_export_excel))
     application.add_handler(CallbackQueryHandler(handle_approval, pattern='^(approve|reject|remove)_'))
     application.add_handler(rating_conv_handler)
-
-    # Fallback для "осиротевших" callback queries (после рестарта бота)
-    application.add_handler(CallbackQueryHandler(handle_orphaned_callback))
-
+    
     # Запускаем бота
     logger.info("Bot started!")
     application.run_polling(allowed_updates=Update.ALL_TYPES)
