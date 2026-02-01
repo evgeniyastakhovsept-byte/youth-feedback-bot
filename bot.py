@@ -1237,7 +1237,7 @@ def main():
             ],
         },
         fallbacks=[CommandHandler('start', start)],
-        per_message=True,
+        per_message=False,
     )
     
     # Регистрируем обработчики
