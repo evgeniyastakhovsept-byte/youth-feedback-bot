@@ -1212,7 +1212,12 @@ def main():
     if config.ADMIN_ID == 0:
         logger.error("ADMIN_ID not set! Please set your Telegram user ID in config.py")
         return
-    
+
+    # DEBUG: включаем подробное логирование для диагностики
+    logging.getLogger("telegram").setLevel(logging.DEBUG)
+    logging.getLogger("httpx").setLevel(logging.DEBUG)
+    logger.info("DEBUG logging enabled for telegram and httpx")
+
     # Создаем приложение
     application = Application.builder().token(config.BOT_TOKEN).build()
     
