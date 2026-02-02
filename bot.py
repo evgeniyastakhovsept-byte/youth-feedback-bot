@@ -2,12 +2,13 @@ import logging
 import os
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
-    Application, 
-    CommandHandler, 
-    CallbackQueryHandler, 
+    Application,
+    CommandHandler,
+    CallbackQueryHandler,
     MessageHandler,
     ConversationHandler,
     ContextTypes,
+    PicklePersistence,
     filters
 )
 from datetime import datetime, timedelta
@@ -33,8 +34,7 @@ WAITING_FOR_INTEREST, WAITING_FOR_RELEVANCE, WAITING_FOR_SPIRITUAL, WAITING_FOR_
 # Инициализация базы данных
 db = Database()
 
-# Глобальные переменные для хранения временных данных оценки
-user_ratings = {}
+# user_ratings теперь хранится в context.user_data['rating'] для persistence
 
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -395,8 +395,8 @@ async def handle_rating_button(update: Update, context: ContextTypes.DEFAULT_TYP
         return
     
     elif action == "rate":
-        # Начинаем процесс оценки
-        user_ratings[user_id] = {
+        # Начинаем процесс оценки - сохраняем в context.user_data для persistence
+        context.user_data['rating'] = {
             'meeting_id': meeting_id,
             'interest': None,
             'relevance': None,
@@ -425,9 +425,9 @@ async def handle_interest_rating(update: Update, context: ContextTypes.DEFAULT_T
     
     user_id = query.from_user.id
     rating = int(query.data.split('_')[1])
-    
-    user_ratings[user_id]['interest'] = rating
-    
+
+    context.user_data['rating']['interest'] = rating
+
     keyboard = [
         [InlineKeyboardButton(str(i), callback_data=f"relevance_{i}") for i in range(1, 6)]
     ]
@@ -450,9 +450,9 @@ async def handle_relevance_rating(update: Update, context: ContextTypes.DEFAULT_
     
     user_id = query.from_user.id
     rating = int(query.data.split('_')[1])
-    
-    user_ratings[user_id]['relevance'] = rating
-    
+
+    context.user_data['rating']['relevance'] = rating
+
     keyboard = [
         [InlineKeyboardButton(str(i), callback_data=f"spiritual_{i}") for i in range(1, 6)]
     ]
@@ -475,9 +475,9 @@ async def handle_spiritual_rating(update: Update, context: ContextTypes.DEFAULT_
     
     user_id = query.from_user.id
     rating = int(query.data.split('_')[1])
-    
-    user_ratings[user_id]['spiritual'] = rating
-    
+
+    context.user_data['rating']['spiritual'] = rating
+
     keyboard = [
         [InlineKeyboardButton("✍️ Залишити відгук", callback_data="feedback_yes")],
         [InlineKeyboardButton("⏭ Пропустити", callback_data="feedback_no")]
@@ -502,7 +502,7 @@ async def handle_feedback_choice(update: Update, context: ContextTypes.DEFAULT_T
     
     if choice == "no":
         # Сохраняем оценки без отзыва
-        rating_data = user_ratings.get(user_id)
+        rating_data = context.user_data.get('rating')
         if rating_data:
             db.add_rating(
                 meeting_id=rating_data['meeting_id'],
@@ -512,8 +512,8 @@ async def handle_feedback_choice(update: Update, context: ContextTypes.DEFAULT_T
                 spiritual_growth=rating_data['spiritual'],
                 attended=True
             )
-            del user_ratings[user_id]
-        
+            context.user_data.pop('rating', None)
+
         await query.edit_message_text(
             "✅ Дякуємо за зворотний зв'язок! 🙏"
         )
@@ -532,12 +532,12 @@ async def handle_feedback_text(update: Update, context: ContextTypes.DEFAULT_TYP
     """Обработчик текстового отзыва"""
     user_id = update.effective_user.id
     feedback_text = update.message.text
-    
-    rating_data = user_ratings.get(user_id)
+
+    rating_data = context.user_data.get('rating')
     if not rating_data:
         await update.message.reply_text("Сталася помилка. Спробуй почати оцінювання заново.")
         return ConversationHandler.END
-    
+
     # Сохраняем оценки
     db.add_rating(
         meeting_id=rating_data['meeting_id'],
@@ -547,12 +547,12 @@ async def handle_feedback_text(update: Update, context: ContextTypes.DEFAULT_TYP
         spiritual_growth=rating_data['spiritual'],
         attended=True
     )
-    
+
     # Сохраняем отзыв
     db.add_feedback(rating_data['meeting_id'], feedback_text)
-    
-    del user_ratings[user_id]
-    
+
+    context.user_data.pop('rating', None)
+
     await update.message.reply_text(
         "✅ Дякуємо за детальний зворотний зв'язок! 🙏"
     )
@@ -1213,13 +1213,12 @@ def main():
         logger.error("ADMIN_ID not set! Please set your Telegram user ID in config.py")
         return
 
-    # DEBUG: включаем подробное логирование для диагностики
-    logging.getLogger("telegram").setLevel(logging.DEBUG)
-    logging.getLogger("httpx").setLevel(logging.DEBUG)
-    logger.info("DEBUG logging enabled for telegram and httpx")
+    # Persistence - сохраняет состояние ConversationHandler и user_data между перезапусками
+    persistence = PicklePersistence(filepath="/var/data/bot_persistence.pickle")
+    logger.info("Persistence enabled - state will be saved to /var/data/bot_persistence.pickle")
 
-    # Создаем приложение
-    application = Application.builder().token(config.BOT_TOKEN).build()
+    # Создаем приложение с persistence
+    application = Application.builder().token(config.BOT_TOKEN).persistence(persistence).build()
     
     # Добавляем фоновую задачу проверки дедлайнов (каждую 1 час)
     job_queue = application.job_queue
@@ -1229,7 +1228,7 @@ def main():
     job_queue.run_repeating(auto_backup, interval=604800, first=3600)
     logger.info("Background job for checking deadlines scheduled (every 1 hour)")
     
-    # Обработчик процесса оценки
+    # Обработчик процесса оценки с persistence
     rating_conv_handler = ConversationHandler(
         entry_points=[CallbackQueryHandler(handle_rating_button, pattern='^(rate|absent)_')],
         states={
@@ -1243,6 +1242,8 @@ def main():
         },
         fallbacks=[CommandHandler('start', start)],
         per_message=False,
+        name="rating_conversation",
+        persistent=True,
     )
     
     # Регистрируем обработчики
