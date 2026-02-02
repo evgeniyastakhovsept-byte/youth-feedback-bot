@@ -605,26 +605,46 @@ async def admin_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     
     stats = db.get_meeting_stats(meeting_id)
-    
-    # Формируем текст статистики
+
+    # Формируем текст статистики (основная часть)
     text = f"📊 *Статистика зустрічі #{meeting_id}*\n\n"
     text += f"👥 Були присутні: {stats['total_attended']}\n"
     text += f"❌ Не було: {stats['not_attended']}\n\n"
-    
+
     if stats['total_attended'] > 0:
         text += f"⭐️ *Середні оцінки:*\n"
         text += f"Цікавість: {stats['avg_interest']}/5\n"
         text += f"Актуальність: {stats['avg_relevance']}/5\n"
-        text += f"Духовне зростання: {stats['avg_spiritual_growth']}/5\n\n"
-    
-    if stats['feedbacks']:
-        text += f"💬 *Відгуки ({len(stats['feedbacks'])}):*\n\n"
-        for i, (feedback, date) in enumerate(stats['feedbacks'], 1):
-            text += f"{i}. {feedback}\n\n"
-    else:
-        text += "💬 Текстових відгуків немає.\n"
-    
+        text += f"Духовне зростання: {stats['avg_spiritual_growth']}/5\n"
+
+    # Отправляем основную статистику
     await update.message.reply_text(text, parse_mode='Markdown')
+
+    # Отправляем отзывы отдельно (разбиваем на части если много)
+    if stats['feedbacks']:
+        feedbacks_text = f"💬 *Відгуки ({len(stats['feedbacks'])}):*\n\n"
+        feedback_count = 0
+
+        for i, (feedback, date) in enumerate(stats['feedbacks'], 1):
+            # Обрезаем длинные отзывы
+            if len(feedback) > 500:
+                feedback = feedback[:500] + "..."
+
+            new_entry = f"{i}. {feedback}\n\n"
+
+            # Если сообщение станет слишком длинным - отправляем и начинаем новое
+            if len(feedbacks_text) + len(new_entry) > 3800:
+                await update.message.reply_text(feedbacks_text, parse_mode='Markdown')
+                feedbacks_text = f"💬 *Відгуки (продовження):*\n\n"
+
+            feedbacks_text += new_entry
+            feedback_count += 1
+
+        # Отправляем оставшиеся отзывы
+        if feedbacks_text.strip() and feedback_count > 0:
+            await update.message.reply_text(feedbacks_text, parse_mode='Markdown')
+    else:
+        await update.message.reply_text("💬 Текстових відгуків немає.")
 
 
 async def admin_ratings(update: Update, context: ContextTypes.DEFAULT_TYPE):
