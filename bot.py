@@ -1234,8 +1234,13 @@ def main():
         return
 
     # Persistence - сохраняет состояние ConversationHandler и user_data между перезапусками
-    persistence = PicklePersistence(filepath="/var/data/bot_persistence.pickle")
-    logger.info("Persistence enabled - state will be saved to /var/data/bot_persistence.pickle")
+    # Удаляем старый pickle при старте чтобы сбросить застрявшие состояния диалогов
+    pickle_path = "/var/data/bot_persistence.pickle"
+    if os.path.exists(pickle_path):
+        os.remove(pickle_path)
+        logger.info("Cleared old persistence file to reset stuck conversation states")
+    persistence = PicklePersistence(filepath=pickle_path)
+    logger.info("Persistence enabled - state will be saved to " + pickle_path)
 
     # Создаем приложение с persistence
     application = Application.builder().token(config.BOT_TOKEN).persistence(persistence).build()
@@ -1260,7 +1265,10 @@ def main():
                 MessageHandler(filters.TEXT & ~filters.COMMAND, handle_feedback_text)
             ],
         },
-        fallbacks=[CommandHandler('start', start)],
+        fallbacks=[
+            CommandHandler('start', start),
+            CallbackQueryHandler(handle_rating_button, pattern='^(rate|absent)_'),
+        ],
         per_message=False,
         name="rating_conversation",
         persistent=True,
