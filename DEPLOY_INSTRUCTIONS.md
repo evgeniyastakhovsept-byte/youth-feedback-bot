@@ -50,7 +50,7 @@ GitHub покажет инструкции. Тебе нужен вариант "
 
 1. Первая переменная:
    - Key: BOT_TOKEN
-   - Value: ***REVOKED_TOKEN***
+   - Value: [ТОКЕН БОТА - возьми у @BotFather]
 
 2. Вторая переменная:
    - Key: ADMIN_ID
